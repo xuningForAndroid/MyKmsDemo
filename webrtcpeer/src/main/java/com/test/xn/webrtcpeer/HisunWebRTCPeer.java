@@ -33,7 +33,7 @@ public class HisunWebRTCPeer {
     public MediaStream activeMediaStream;
     public HisunWebRTCPeerObserver observer;
     private final HisunPeerConnectionParameter connectionParameter;
-    private final LinkedList<PeerConnection.IceServer> iceServers;
+    private  LinkedList<PeerConnection.IceServer> iceServers;
     public boolean initiatized;
     public PCResourceManager pcResourceManager;
     public PeerConnectionFactory peerConnectionFactory;
@@ -70,6 +70,71 @@ public class HisunWebRTCPeer {
         addIceServer("stun:stun.l.google.com:19302");
     }
 
+    public void registerMasterRenderer(VideoRenderer.Callbacks masterRenderer){
+        this.masterRenderer=masterRenderer;
+        updateMasterRenderer();
+    }
+
+    public void setActiveMasterStream(MediaStream stream){
+        this.activeMediaStream=stream;
+        updateMasterRenderer();
+    }
+
+    private void updateMasterRenderer() {
+        if (masterRenderer!=null && activeMediaStream!=null){
+            attachRenderToRemoteStream(masterRenderer,activeMediaStream);
+        }
+    }
+
+    //是否被初始化
+    public boolean isInitiatized(){
+        return isInitiatized();
+    }
+
+    private class GenerateOfferTask implements Runnable{
+        String connectionId;
+        boolean includeLocalMedia;
+
+        public GenerateOfferTask(String connectionId, boolean includeLocalMedia) {
+            this.connectionId = connectionId;
+            this.includeLocalMedia = includeLocalMedia;
+        }
+
+        @Override
+        public void run() {
+            if (mediaResourceManager.getLocalMediaStream()==null){
+                mediaResourceManager.createMediaConstraint();
+                startLocalMediaSync();
+            }
+            HisunPeerConnection connection = pcResourceManager.getConnection(connectionId);
+            if (connection==null){
+                if (signalingParameters!=null){
+                    connection=pcResourceManager.createPeerConnection(signalingParameters,mediaResourceManager.getPcConstraints()
+                            ,connectionId);
+                    connection.addObserver(observer);
+                    connection.addObserver(mediaResourceManager);
+                    if (includeLocalMedia){
+                        connection.getPc().addStream(mediaResourceManager.getLocalMediaStream());
+                    }
+
+                    DataChannel.Init init = new DataChannel.Init();
+                    createDataChannel(connectionId,"default",init);
+                    /**
+                     * 创建offer，offer的sdp将被送到应答端在onLocalDescription的事件中
+                     */
+                    connection.createOffer(mediaResourceManager.getSdpMediaConstraints());
+                }
+            }
+
+        }
+    }
+    public void setIceServers(LinkedList<PeerConnection.IceServer> iceServers){
+        if (!initiatized){
+            this.iceServers=iceServers;
+        }else {
+            throw new RuntimeException("Cannot set ICE servers after webRtcPeer has been initialized");
+        }
+    }
     /**
      * 添加ice服务
      * @param serverURI
@@ -103,9 +168,6 @@ public class HisunWebRTCPeer {
      */
     public void processOffer(SessionDescription remoteOffer,String connectionId){
         executor.execute(new ProcessOfferTask(remoteOffer,connectionId));
-
-
-
     }
 
     /**
